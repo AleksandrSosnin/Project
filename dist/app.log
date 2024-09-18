@@ -1,0 +1,2 @@
+2024-09-17 21:50:01,410 - ERROR - Ошибка при чтении файла конфигурации: [Errno 2] No such file or directory: 'config.txt'
+2024-09-17 21:50:01,410 - ERROR - Общая ошибка: [Errno 2] No such file or directory: 'config.txt'
