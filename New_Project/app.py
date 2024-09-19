@@ -185,9 +185,14 @@ tk.Label(root, text="Номер визита:").pack()
 номер_визита_entry = tk.Entry(root)
 номер_визита_entry.pack()
 
+# Поле ввода для API ключа
 tk.Label(root, text="API ключ:").pack()
 api_ключ_entry = tk.Entry(root)
 api_ключ_entry.pack()
+
+# Увеличение максимального количества символов (при необходимости)
+api_ключ_entry.config(width=50)  # Увеличим ширину для удобства
+
 
 tk.Label(root, text="Дата начала (ДД.ММ.ГГГГ):").pack()
 дата_начала_entry = tk.Entry(root)
