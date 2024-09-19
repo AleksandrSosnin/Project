@@ -5,7 +5,20 @@ import json
 import mysql.connector
 from datetime import datetime
 
-# Функция для валидации дат
+# Функция для валидации и форматирования дат
+def format_date(event=None, entry=None):
+    text = entry.get().replace('.', '')
+    if len(text) > 8:
+        text = text[:8]
+    new_text = ''
+    for i in range(len(text)):
+        if i in (2, 4):
+            new_text += '.'
+        new_text += text[i]
+    entry.delete(0, tk.END)
+    entry.insert(0, new_text)
+
+# Функция для проверки формата дат
 def validate_date_format(date_str):
     try:
         datetime.strptime(date_str, "%d.%m.%Y")
@@ -13,60 +26,53 @@ def validate_date_format(date_str):
     except ValueError:
         return False
 
-# Функция для подключения к MySQL и сохранения данных
-def save_to_mysql(data, table_name):
-    try:
-        conn = mysql.connector.connect(
-            host="localhost",  # или другой хост
-            user="your_username",
-            password="your_password",
-            database="your_database"
-        )
-        cursor = conn.cursor()
-
-        # Создаем таблицу, если она не существует
-        cursor.execute(f'''
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                visit_number INT,
-                api_key VARCHAR(255),
-                start_date DATE,
-                end_date DATE,
-                fields JSON
-            )
-        ''')
-
-        # Вставляем данные
-        insert_query = f'''
-            INSERT INTO {table_name} (visit_number, api_key, start_date, end_date, fields)
-            VALUES (%s, %s, %s, %s, %s)
-        '''
-        cursor.execute(insert_query, data)
-        conn.commit()
-
-        messagebox.showinfo("Успех", "Данные успешно сохранены в MySQL!")
-        cursor.close()
-        conn.close()
-    except mysql.connector.Error as err:
-        messagebox.showerror("Ошибка", f"Ошибка MySQL: {err}")
-
-# Функция для выполнения запроса к API Яндекс Метрики
-def fetch_data_from_yandex_api(api_key, visit_number, start_date, end_date, fields):
-    url = "https://api-metrika.yandex.net/stat/v1/data"
+# Функция для отправки запроса к API Яндекс Метрики и получения данных
+def export_data_to_db(api_ключ, номер_визита, дата_начала, дата_окончания, выбранные_поля):
+    # URL для API Яндекс Метрики
+    api_url = 'https://api-metrika.yandex.net/stat/v1/data'
+    
+    # Параметры запроса к API
     params = {
-        "ids": visit_number,
-        "start-date": start_date,
-        "end-date": end_date,
-        "metrics": ",".join(fields),
-        "oauth_token": api_key
+        'ids': номер_визита,
+        'metrics': ','.join(выбранные_поля),
+        'date1': datetime.strptime(дата_начала, "%d.%m.%Y").strftime("%Y-%m-%d"),
+        'date2': datetime.strptime(дата_окончания, "%d.%m.%Y").strftime("%Y-%m-%d"),
+        'oauth_token': api_ключ
     }
-    try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
+
+    # Отправка запроса
+    response = requests.get(api_url, params=params)
+
+    # Проверка успешности запроса
+    if response.status_code == 200:
         data = response.json()
-        return data
-    except requests.RequestException as e:
-        messagebox.showerror("Ошибка", f"Ошибка запроса к API: {e}")
-        return None
+        save_to_mysql(data)  # Сохранение данных в базу данных MySQL
+        messagebox.showinfo("Успех", "Данные успешно выгружены и сохранены в базу данных.")
+    else:
+        messagebox.showerror("Ошибка", f"Ошибка при запросе к API: {response.status_code}\n{response.text}")
+
+# Функция для сохранения данных в MySQL
+def save_to_mysql(data):
+    # Настройки подключения к MySQL (замените на свои данные)
+    conn = mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="your_password",
+        database="yandex_metrika"
+    )
+    cursor = conn.cursor()
+
+    # Пример вставки данных (адаптируйте под ваши поля)
+    for row in data['data']:
+        query = """
+        INSERT INTO metrika_data (field1, field2, field3)
+        VALUES (%s, %s, %s)
+        """
+        cursor.execute(query, (row['dimensions'][0]['name'], row['metrics'][0], row['metrics'][1]))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 # Функция для запуска выгрузки данных
 def start_data_export():
@@ -90,53 +96,12 @@ def start_data_export():
         return
 
     выбранные_поля = [fields_list[i] for i, var in enumerate(checkbox_vars) if var.get()]
-    
+
     if not выбранные_поля:
         messagebox.showerror("Ошибка", "Выберите хотя бы одно поле для выгрузки.")
         return
 
-    # Формируем данные для MySQL
-    данные_для_сохранения = (
-        int(номер_визита),
-        api_ключ,
-        datetime.strptime(дата_начала, "%d.%m.%Y").date(),
-        datetime.strptime(дата_окончания, "%d.%m.%Y").date(),
-        json.dumps(выбранные_поля)  # Сохраняем поля как JSON
-    )
-
-    # Выполняем запрос к API Яндекс Метрики
-    данные_из_апи = fetch_data_from_yandex_api(api_ключ, номер_визита, дата_начала, дата_окончания, выбранные_поля)
-    
-    if данные_из_апи:
-        # Сохраняем данные в MySQL
-        save_to_mysql(данные_для_сохранения, "metrica_data")
-
-# Функция для форматирования даты в поле ввода
-def format_date(event=None):
-    entry = event.widget
-    raw_date = entry.get().replace('.', '').replace('-', '')
-    
-    if len(raw_date) > 8:
-        raw_date = raw_date[:8]
-    
-    if len(raw_date) >= 6:
-        formatted_date = f"{raw_date[:2]}.{raw_date[2:4]}.{raw_date[4:8]}"
-    elif len(raw_date) >= 4:
-        formatted_date = f"{raw_date[:2]}.{raw_date[2:4]}"
-    else:
-        formatted_date = raw_date
-    
-    entry.delete(0, tk.END)
-    entry.insert(0, formatted_date)
-
-    # Устанавливаем курсор в конец строки
-    entry.icursor(tk.END)
-
-# Функция для выбора всех полей
-def toggle_all_fields():
-    state = tk.NORMAL if toggle_all_var.get() else tk.DISABLED
-    for var in checkbox_vars:
-        var.set(1)
+    export_data_to_db(api_ключ, номер_визита, дата_начала, дата_окончания, выбранные_поля)
 
 # Поля для выбора
 fields_list = [
@@ -178,31 +143,26 @@ fields_list = [
 # Создание основного окна
 root = tk.Tk()
 root.title("Приложение для выгрузки данных Яндекс Метрики")
-root.geometry("600x600")
+root.geometry("600x700")
 
 # Метки и поля ввода
 tk.Label(root, text="Номер визита:").pack()
 номер_визита_entry = tk.Entry(root)
 номер_визита_entry.pack()
 
-# Поле ввода для API ключа
 tk.Label(root, text="API ключ:").pack()
 api_ключ_entry = tk.Entry(root)
 api_ключ_entry.pack()
 
-# Увеличение максимального количества символов (при необходимости)
-api_ключ_entry.config(width=50)  # Увеличим ширину для удобства
-
-
 tk.Label(root, text="Дата начала (ДД.ММ.ГГГГ):").pack()
 дата_начала_entry = tk.Entry(root)
 дата_начала_entry.pack()
-дата_начала_entry.bind("<KeyRelease>", format_date)
+дата_начала_entry.bind('<KeyRelease>', lambda event: format_date(event, дата_начала_entry))
 
 tk.Label(root, text="Дата окончания (ДД.ММ.ГГГГ):").pack()
 дата_окончания_entry = tk.Entry(root)
 дата_окончания_entry.pack()
-дата_окончания_entry.bind("<KeyRelease>", format_date)
+дата_окончания_entry.bind('<KeyRelease>', lambda event: format_date(event, дата_окончания_entry))
 
 # Секция выбора полей
 fields_frame = tk.Frame(root)
@@ -222,18 +182,13 @@ canvas.configure(yscrollcommand=scrollbar.set)
 
 checkbox_vars = []
 for field in fields_list:
-    var = tk.IntVar(value=1)  # Все галочки по умолчанию включены
+    var = tk.IntVar(value=1)  # Галочки установлены по умолчанию
     checkbox = tk.Checkbutton(scrollable_frame, text=field, variable=var)
     checkbox.pack(anchor="w")
     checkbox_vars.append(var)
 
 canvas.pack(side="left", fill="both", expand=True)
 scrollbar.pack(side="right", fill="y")
-
-# Кнопка для выбора всех полей
-toggle_all_var = tk.BooleanVar(value=True)
-toggle_all_button = tk.Checkbutton(root, text="Выбрать все поля", variable=toggle_all_var, command=toggle_all_fields)
-toggle_all_button.pack()
 
 # Кнопка для запуска процесса
 tk.Button(root, text="Запустить выгрузку данных", command=start_data_export).pack()
